@@ -1,0 +1,4 @@
+# Docker Compose для MVP Кейса №1
+# Будет заполнено на этапе сборки
+version: '3.8'
+services: {}
