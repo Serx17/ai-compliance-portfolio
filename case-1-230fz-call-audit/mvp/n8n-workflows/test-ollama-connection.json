@@ -1,0 +1,60 @@
+{
+  "name": "Test Ollama Connection",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a1c884c7-5e17-45fb-9340-ced273cbf450",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"qwen2.5:7b\",\n  \"prompt\": \"Привет, ты работаешь?\",\n  \"stream\": false\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "2c3316d9-4245-4e70-80b1-d6c4f756e95c",
+      "name": "HTTP Request"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "713661ed-f881-4f09-a72d-38c831591882",
+  "meta": {
+    "instanceId": "6a0831fcc8f9784768d469ce3a517093bc1e3798fb78fee46cba1c7475ca3395"
+  },
+  "nodeGroups": [],
+  "id": "OWRSAZhJdA7A2X0S",
+  "tags": []
+}
