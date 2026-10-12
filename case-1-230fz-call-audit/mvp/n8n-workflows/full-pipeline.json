@@ -1,0 +1,131 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "transcribe",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "6781f02a-aa0f-4c1f-84f2-0cbf176cb8a6",
+      "name": "Webhook",
+      "webhookId": "d0bcf389-61b6-4ca6-be45-da46dd5055cc"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/transcribe",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "3bd1e2bb-d520-40e3-a035-dae905555cc7",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        608,
+        0
+      ],
+      "id": "62b50c94-ba3f-41fe-a325-7ea9010ff602",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО time_violation\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО нарушение по времени.\n\nНарушение времени = звонок вне разрешённого времени (до 8:00 или после 22:00 в рабочие дни; до 9:00 или после 20:00 в выходные).\n\nПризнаки: прямое упоминание времени в тексте (\"сейчас 22:15\", \"половина одиннадцатого\", \"вечер\", \"ночь\").\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста, подтверждающая нарушение (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "3dc22f28-2b1f-4b66-a311-d9d4b62540de",
+      "name": "Code in JavaScript"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        []
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d8817e3e-e6b3-42fd-8077-7a29c019ba86",
+  "meta": {
+    "instanceId": "6a0831fcc8f9784768d469ce3a517093bc1e3798fb78fee46cba1c7475ca3395"
+  },
+  "nodeGroups": [],
+  "id": "NuIEKiDiTfh5h4PK",
+  "tags": []
+}
