@@ -5,6 +5,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "transcribe",
+        "responseMode": "responseNode",
         "options": {}
       },
       "type": "n8n-nodes-base.webhook",
@@ -63,7 +64,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО time_violation\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО нарушение по времени.\n\nНарушение времени = звонок вне разрешённого времени (до 8:00 или после 22:00 в рабочие дни; до 9:00 или после 20:00 в выходные).\n\nПризнаки: прямое упоминание времени в тексте (\"сейчас 22:15\", \"половина одиннадцатого\", \"вечер\", \"ночь\").\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста, подтверждающая нарушение (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
+        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО time_violation\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО нарушение по времени.\n\nНарушение времени = звонок вне разрешённого времени (до 8:00 или после 22:00 в рабочие дни; до 9:00 или после 20:00 в выходные).\n\nПризнаки: прямое упоминание времени в тексте (\"сейчас 22:15\", \"половина одиннадцатого\", \"вечер\", \"ночь\").\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"type\": \"time_violation\",\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста, подтверждающая нарушение (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -73,6 +74,141 @@
       ],
       "id": "3dc22f28-2b1f-4b66-a311-d9d4b62540de",
       "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО third_party_disclosure\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО нарушение по раскрытию долга третьим лицам.\n\nНарушение = оператор раскрыл сумму долга, факт долга или детали задолженности третьему лицу (родственник, коллега, сосед, знакомый должника).\n\nПризнаки:\n- \"передайте ему/ей\", \"скажите маме/жене/брату\"\n- упоминание суммы долга при разговоре с третьим лицом\n- \"он/она вам не говорил(а)?\"\n\nНЕ является нарушением:\n- Разговор напрямую с должником (не третьим лицом).\n- Упоминание долга без третьих лиц.\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"type\": \"third_party_disclosure\",\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -160
+      ],
+      "id": "4f4bd3a7-ef30-4a2f-a941-d0a9adc6194f",
+      "name": "Code (third_party)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО psychological_pressure\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО психологическое давление.\n\nПсихологическое давление = прямые угрозы, шантаж, унижение, введение в заблуждение.\n\nПризнаки:\n- Угрозы физической расправы (\"мы приедем\", \"будут проблемы\").\n- Шантаж (\"мы найдём всех\", \"мы позвоним вашим родственникам\").\n- Унижение (\"вы никто\", \"вы должны были думать раньше\").\n- Введение в заблуждение (\"мы заберём ваше имущество сегодня\" — если это неправда).\n\nНЕ является нарушением:\n- Вежливое напоминание о долге.\n- Информирование о последствиях по закону (\"мы будем вынуждены обратиться в суд\").\n- Упоминание ФССП.\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"type\": \"psychological_pressure\",\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -304
+      ],
+      "id": "7bd44ba1-8971-4a5e-87c7-dff391551492",
+      "name": "Code (pressure)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Получаем транскрипт от ASR\nconst transcript = $input.first().json.text;\n\n// Промпт: ТОЛЬКО lack_of_identification\nconst prompt = `Проанализируй текст звонка коллектора. Найди ТОЛЬКО нарушение по идентификации оператора.\n\nНарушение = оператор не представился в начале разговора.\n\nПризнаки:\n- В начале разговора оператор НЕ назвал:\n  - своё ФИО или имя\n  - название организации (МФО, банк, коллекторское агентство)\n  - должность\n\n- Оператор отказался представляться (\"я не обязан представляться\", \"это неважно\").\n\nНЕ является нарушением:\n- Оператор представился только по имени (\"это Анна из банка\") — этого достаточно.\n- Оператор назвал организацию, но не назвал ФИО — это НЕ нарушение, если организация названа.\n\nВерни СТРОГО JSON без пояснений:\n{\n  \"type\": \"lack_of_identification\",\n  \"found\": true или false,\n  \"quote\": \"точная цитата из текста (или пустая строка)\",\n  \"confidence\": число от 0.0 до 1.0,\n  \"reasoning\": \"краткое объяснение\"\n}\n\nТЕКСТ ЗВОНКА:\n${transcript}`;\n\nreturn {\n  json: {\n    model: \"qwen2.5:7b\",\n    prompt: prompt,\n    stream: false,\n    options: {\n      temperature: 0.0,\n      top_p: 0.9\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        -448
+      ],
+      "id": "187ddaab-da10-43fa-9fb0-f1bc83806cbf",
+      "name": "Code (identification)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        -160
+      ],
+      "id": "7feec236-5706-4427-8c9b-ae8d66c6bf8d",
+      "name": "Ollama (third_party)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        -304
+      ],
+      "id": "65be6653-6f08-4fde-8797-394adfec8ffb",
+      "name": "Ollama (pressure)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        -448
+      ],
+      "id": "b332d8b9-8bba-48fa-a444-50980b5d7944",
+      "name": "Ollama (identification)"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1232,
+        -400
+      ],
+      "id": "f0c7f6a4-e59e-4508-811e-4967e2ca339f",
+      "name": "Respond"
+    },
+    {
+      "parameters": {
+        "expectedInputs": 4,
+        "timeout": 300
+      },
+      "type": "@conciso/n8n-nodes-join.join",
+      "typeVersion": 1,
+      "position": [
+        784,
+        -448
+      ],
+      "id": "d7ca2193-15b4-4007-b52d-a0b505c2b1be",
+      "name": "Join results"
+    },
+    {
+      "parameters": {
+        "jsCode": "const joinOutput = $input.first().json;\n\nconst violations = [];\nconst checked = [];\n\n// Проходим по всем ключам верхнего уровня\nfor (const key of Object.keys(joinOutput)) {\n  const input = joinOutput[key];\n  \n  // Проверяем, что это объект с полем response\n  if (!input || typeof input !== 'object') continue;\n  \n  // response может быть в input.response или в input напрямую\n  let response = input.response || input;\n  \n  // Если response — строка, парсим JSON\n  let parsed;\n  try {\n    parsed = typeof response === 'string' \n      ? JSON.parse(response) \n      : response;\n  } catch (e) {\n    const match = String(response).match(/\\{[\\s\\S]*\\}/);\n    if (!match) continue;\n    try { parsed = JSON.parse(match[0]); } catch (e2) { continue; }\n  }\n  \n  if (parsed && parsed.type) {\n    checked.push(parsed.type);\n    if (parsed.found === true) {\n      violations.push({\n        type: parsed.type,\n        quote: parsed.quote,\n        confidence: parsed.confidence,\n        reasoning: parsed.reasoning\n      });\n    }\n  }\n}\n\nreturn {\n  json: {\n    violations: violations,\n    total_checked: checked.length,\n    total_found: violations.length,\n    checked_types: checked\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        -448
+      ],
+      "id": "8544e005-0e35-451c-8503-cdba7e87d656",
+      "name": "Parse results"
     }
   ],
   "pinData": {},
@@ -95,13 +231,34 @@
             "node": "Code in JavaScript",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Code (third_party)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code (pressure)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code (identification)",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
     },
     "HTTP Request1": {
       "main": [
-        []
+        [
+          {
+            "node": "Join results",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Code in JavaScript": {
@@ -114,6 +271,94 @@
           }
         ]
       ]
+    },
+    "Ollama (identification)": {
+      "main": [
+        [
+          {
+            "node": "Join results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama (pressure)": {
+      "main": [
+        [
+          {
+            "node": "Join results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama (third_party)": {
+      "main": [
+        [
+          {
+            "node": "Join results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (identification)": {
+      "main": [
+        [
+          {
+            "node": "Ollama (identification)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (pressure)": {
+      "main": [
+        [
+          {
+            "node": "Ollama (pressure)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (third_party)": {
+      "main": [
+        [
+          {
+            "node": "Ollama (third_party)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Join results": {
+      "main": [
+        [
+          {
+            "node": "Parse results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse results": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": true,
@@ -121,7 +366,7 @@
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "d8817e3e-e6b3-42fd-8077-7a29c019ba86",
+  "versionId": "40785ac3-2c1c-49d9-b778-ce733016981d",
   "meta": {
     "instanceId": "6a0831fcc8f9784768d469ce3a517093bc1e3798fb78fee46cba1c7475ca3395"
   },
