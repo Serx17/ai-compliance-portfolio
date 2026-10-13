@@ -109,6 +109,12 @@ flowchart TD
 
 ---
 
+## Production Roadmap
+
+MVP, описанный выше — это proof-of-concept. Для production на реальных данных клиента требуются четыре дополнительных слоя: fine-tuning LoRA, RAG, HITL-цикл и правиловый движок.
+
+→ Детали: [production-roadmap.md](production-roadmap.md)
+
 ## 7. Что дальше
 
 Предлагаю начать не с покупки, а с измерения:
