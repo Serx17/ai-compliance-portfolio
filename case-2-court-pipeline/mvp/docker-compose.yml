@@ -25,6 +25,10 @@ services:
       - ./rules:/home/node/rules:ro
       - ./preprocessor:/home/node/preprocessor:ro
       - ./synthetic-data:/home/node/synthetic-data:ro
+    # Linux: host.docker.internal не работает без явного маппинга.
+    # Это нужно, чтобы n8n-court видел Ollama, запущенный на хосте (порт 11434).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - ai-compliance
 
@@ -39,6 +43,5 @@ networks:
 #     cd ~/ai-compliance && docker compose up -d ollama
 # - Проверка доступности Ollama из контейнера n8n-court:
 #     docker exec ai-compliance-n8n-court curl http://host.docker.internal:11434/api/tags
-# - На Linux для host.docker.internal нужен extra_hosts:
-#     extra_hosts:
-#       - "host.docker.internal:host-gateway"
+# - extra_hosts с host-gateway работает на Docker 20.10+.
+#   Проверить версию: docker version --format '{{.Server.Version}}'
