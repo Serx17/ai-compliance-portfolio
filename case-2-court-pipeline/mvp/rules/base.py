@@ -156,21 +156,28 @@ class ZoneChecker(ABC):
         """
         Определение статуса по списку нарушений.
 
-        Логика по умолчанию:
+        Логика:
         - нет issues → PASS
-        - все issues с meta['severity'] == 'warning' → WARNING
-        - есть issues с meta['severity'] == 'fail' (или без severity) → FAIL
+        - все issues со severity='pass' → PASS (для аудита)
+        - есть issues с severity='fail' → FAIL
+        - иначе (только warning) → WARNING
 
         Зоны могут переопределить это поведение.
         """
         if not issues:
             return ZoneStatus.PASS
 
-        has_critical = any(
-            issue.meta.get("severity", "fail") == "fail"
+        severities = [
+            issue.meta.get("severity", "fail")
             for issue in issues
-        )
-        if has_critical:
+        ]
+
+        if "fail" in severities:
             return ZoneStatus.FAIL
 
-        return ZoneStatus.WARNING
+        # Если есть хоть один warning — WARNING
+        if "warning" in severities:
+            return ZoneStatus.WARNING
+
+        # Все issues со severity='pass' → PASS
+        return ZoneStatus.PASS
