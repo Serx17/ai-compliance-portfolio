@@ -8,6 +8,7 @@ Runner: запуск всех 7 зон контроля.
 - Если одна зона падает с ошибкой — остальные всё равно выполняются.
 - Итоговый отчёт содержит: статус по каждой зоне, сводку, признак HITL.
 - Логирование — структурированное, с уровнями INFO/WARNING/ERROR.
+- Порог HITL читается из .env (HITL_THRESHOLD) с override через аргумент.
 
 Использование:
     from rules.runner import RulesRunner
@@ -21,6 +22,7 @@ Runner: запуск всех 7 зон контроля.
 """
 
 import logging
+import os
 import traceback
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -78,24 +80,58 @@ class RulesRunner:
 
     Attributes:
         zones: список классов зон (по умолчанию — все 7).
-        hitl_threshold: порог critical_issues для HITL (по умолчанию 0 — любой FAIL).
+        hitl_threshold: порог critical_issues для HITL.
+            По умолчанию читается из .env (HITL_THRESHOLD),
+            если не задано — 0 (любой FAIL требует HITL).
     """
 
     def __init__(
         self,
         zones: Optional[List[type]] = None,
-        hitl_threshold: int = 0,
+        hitl_threshold: Optional[int] = None,
     ):
         """
         Args:
             zones: список классов-наследников ZoneChecker.
                 По умолчанию — DEFAULT_ZONES (7 зон).
             hitl_threshold: минимальное число критичных issues,
-                при котором документ требует HITL. По умолчанию 0 —
-                любой FAIL требует проверки.
+                при котором документ требует HITL.
+                По умолчанию — читается из .env (HITL_THRESHOLD),
+                если не задано — 0 (любой FAIL требует проверки).
         """
         self.zones = zones or DEFAULT_ZONES
-        self.hitl_threshold = hitl_threshold
+        self.hitl_threshold = self._resolve_hitl_threshold(hitl_threshold)
+        logger.info(
+            "RulesRunner initialized: zones=%d, hitl_threshold=%d",
+            len(self.zones),
+            self.hitl_threshold,
+        )
+
+    @staticmethod
+    def _resolve_hitl_threshold(override: Optional[int]) -> int:
+        """
+        Определение порога HITL.
+
+        Приоритет:
+        1. Явный аргумент (override) — для тестов.
+        2. Переменная окружения HITL_THRESHOLD — для production.
+        3. Значение по умолчанию — 0 (любой FAIL требует HITL).
+        """
+        if override is not None:
+            return override
+
+        env_value = os.getenv("HITL_THRESHOLD")
+        if env_value is not None:
+            try:
+                return int(env_value)
+            except ValueError:
+                logger.warning(
+                    "HITL_THRESHOLD='%s' — невалидное значение, "
+                    "используется 0",
+                    env_value,
+                )
+
+        return 0
 
     def run(self, card: dict, preprocessed: dict) -> dict:
         """
