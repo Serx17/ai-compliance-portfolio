@@ -6,12 +6,14 @@
 
 Всё, что делает препроцессор — детерминировано.
 LLM получает уже подготовленные данные и НЕ может их изменить.
+
+Юридические ограничения учтены в calculator.py (353-ФЗ, ч. 24 ст. 5).
 """
 
 from datetime import date
 from typing import Optional
 
-from .calculator import calculate_debt, DebtCalculation
+from .calculator import calculate_debt, DebtCalculation, MAX_OVERPAYMENT_RATIO
 from .requisites import format_requisites
 from .limitation import check_limitation, LimitationResult
 
@@ -36,7 +38,7 @@ class Preprocessor:
             dict с ключами:
             - case_id
             - requisites: реквизиты + результаты валидации
-            - debt: расчёт задолженности
+            - debt: расчёт задолженности (с учётом 353-ФЗ)
             - limitation: проверка исковой давности
             - issues: список всех проблем (для передачи в зоны контроля)
         """
@@ -45,7 +47,7 @@ class Preprocessor:
         # 1. Реквизиты
         requisites = format_requisites(self.card)
 
-        # 2. Расчёт задолженности
+        # 2. Расчёт задолженности (с учётом 353-ФЗ)
         debt: DebtCalculation = calculate_debt(self.card, self.calculation_date)
 
         # 3. Исковая давность
@@ -74,6 +76,10 @@ class Preprocessor:
                 "interest": debt.interest,
                 "penalty": debt.penalty,
                 "total": debt.total,
+                "raw_interest": debt.raw_interest,
+                "raw_penalty": debt.raw_penalty,
+                "cap_applied": debt.cap_applied,
+                "max_overpayment_ratio": MAX_OVERPAYMENT_RATIO,
                 "period": {
                     "start": debt.period.start.isoformat(),
                     "end": debt.period.end.isoformat(),
