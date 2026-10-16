@@ -1,7 +1,16 @@
 # Case 2: ИИ-конвейер судебных документов
-# Отдельный n8n-инстанс на порту 5679, общий Ollama с Кейсом №1
+#
+# Сервисы:
+# - n8n-court:     оркестратор (порт 5679)
+# - rules-service: FastAPI-обёртка над препроцессором и 7 зонами (порт 8001)
+#
+# Ollama (порт 11434) — общий с Кейсом №1, запускается отдельно.
 
 services:
+
+  # ---------------------------------------------------------------- #
+  # n8n-court: оркестратор конвейера                                  #
+  # ---------------------------------------------------------------- #
   n8n-court:
     image: n8nio/n8n:latest
     container_name: ai-compliance-n8n-court
@@ -20,13 +29,46 @@ services:
       - N8N_LOG_LEVEL=info
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
+      # URL rules-service внутри Docker-сети
+      - RULES_SERVICE_URL=http://rules-service:8001
+      # URL Ollama на хосте
+      - OLLAMA_URL=http://host.docker.internal:11434
     volumes:
       - ./n8n_data:/home/node/.n8n
-      - ./rules:/home/node/rules:ro
-      - ./preprocessor:/home/node/preprocessor:ro
       - ./synthetic-data:/home/node/synthetic-data:ro
-    # Linux: host.docker.internal не работает без явного маппинга.
-    # Это нужно, чтобы n8n-court видел Ollama, запущенный на хосте (порт 11434).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      rules-service:
+        condition: service_healthy
+    networks:
+      - ai-compliance
+
+  # ---------------------------------------------------------------- #
+  # rules-service: препроцессор + 7 зон контроля                      #
+  # ---------------------------------------------------------------- #
+  rules-service:
+    build:
+      context: .                                 # контекст = mvp/
+      dockerfile: rules-service/Dockerfile
+    container_name: ai-compliance-rules-service
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - LOG_LEVEL=info
+      - HITL_THRESHOLD=${HITL_THRESHOLD:-0}
+      - MAX_OVERPAYMENT_RATIO=${MAX_OVERPAYMENT_RATIO:-1.00}
+      - PENALTY_DAILY_RATE=${PENALTY_DAILY_RATE:-0.0005}
+      - PENALTY_MAX_DAILY_RATE=${PENALTY_MAX_DAILY_RATE:-0.001}
+      - PDF_OUTPUT_DIR=/tmp/court-pdfs
+    volumes:
+      # Монтируем код для горячей перезагрузки (в dev)
+      - ./preprocessor:/app/preprocessor:ro
+      - ./rules:/app/rules:ro
+      - ./rules-service:/app/rules-service:ro
+      # Директория для PDF (персистентная)
+      - ./pdf-output:/tmp/court-pdfs
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -38,10 +80,11 @@ networks:
     driver: bridge
 
 # ВАЖНО:
-# - Ollama (порт 11434) — общий с Кейсом №1, запускается отдельно.
-# - Если Ollama ещё не запущен, подними его в ~/ai-compliance/ на сервере:
+# - Ollama (порт 11434) — общий с Кейсом №1, запускается отдельно:
 #     cd ~/ai-compliance && docker compose up -d ollama
-# - Проверка доступности Ollama из контейнера n8n-court:
+# - Проверка доступности Ollama из n8n-court:
 #     docker exec ai-compliance-n8n-court curl http://host.docker.internal:11434/api/tags
-# - extra_hosts с host-gateway работает на Docker 20.10+.
-#   Проверить версию: docker version --format '{{.Server.Version}}'
+# - Проверка rules-service:
+#     curl http://localhost:8001/health
+# - Сборка rules-service:
+#     cd mvp && docker compose build rules-service
