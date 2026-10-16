@@ -7,13 +7,22 @@
 Всё, что делает препроцессор — детерминировано.
 LLM получает уже подготовленные данные и НЕ может их изменить.
 
-Юридические ограничения учтены в calculator.py (353-ФЗ, ч. 24 ст. 5).
+Юридические ограничения учтены в calculator.py:
+- 353-ФЗ, ч. 23 ст. 5: максимальная ставка
+- 353-ФЗ, ч. 24 ст. 5: потолок переплаты
+- 353-ФЗ, ч. 21 ст. 5: потолок неустойки
 """
 
 from datetime import date
 from typing import Optional
 
-from .calculator import calculate_debt, DebtCalculation, MAX_OVERPAYMENT_RATIO
+from .calculator import (
+    calculate_debt,
+    DebtCalculation,
+    MAX_OVERPAYMENT_RATIO,
+    PENALTY_DAILY_RATE,
+    PENALTY_MAX_DAILY_RATE,
+)
 from .requisites import format_requisites
 from .limitation import check_limitation, LimitationResult
 
@@ -80,6 +89,8 @@ class Preprocessor:
                 "raw_penalty": debt.raw_penalty,
                 "cap_applied": debt.cap_applied,
                 "max_overpayment_ratio": MAX_OVERPAYMENT_RATIO,
+                "penalty_rate_used": debt.penalty_rate_used,
+                "penalty_max_rate": PENALTY_MAX_DAILY_RATE,
                 "period": {
                     "start": debt.period.start.isoformat(),
                     "end": debt.period.end.isoformat(),
