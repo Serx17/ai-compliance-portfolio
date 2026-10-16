@@ -1,0 +1,44 @@
+# Case 2: ИИ-конвейер судебных документов
+# Отдельный n8n-инстанс на порту 5679, общий Ollama с Кейсом №1
+
+services:
+  n8n-court:
+    image: n8nio/n8n:latest
+    container_name: ai-compliance-n8n-court
+    restart: unless-stopped
+    ports:
+      - "5679:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://localhost:5679/
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
+      - GENERIC_TIMEZONE=Europe/Moscow
+      - N8N_LOG_LEVEL=info
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./rules:/home/node/rules:ro
+      - ./preprocessor:/home/node/preprocessor:ro
+      - ./synthetic-data:/home/node/synthetic-data:ro
+    networks:
+      - ai-compliance
+
+networks:
+  ai-compliance:
+    name: ai-compliance
+    driver: bridge
+
+# ВАЖНО:
+# - Ollama (порт 11434) — общий с Кейсом №1, запускается отдельно.
+# - Если Ollama ещё не запущен, подними его в ~/ai-compliance/ на сервере:
+#     cd ~/ai-compliance && docker compose up -d ollama
+# - Проверка доступности Ollama из контейнера n8n-court:
+#     docker exec ai-compliance-n8n-court curl http://host.docker.internal:11434/api/tags
+# - На Linux для host.docker.internal нужен extra_hosts:
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
