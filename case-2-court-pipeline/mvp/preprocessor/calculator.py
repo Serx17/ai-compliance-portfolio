@@ -4,20 +4,16 @@
 Ключевое: все расчёты — детерминированы. LLM не участвует в арифметике.
 
 Юридические ограничения (353-ФЗ «О потребительском кредите»):
-- Ставка не более 0,8% в день (ч. 23 ст. 5) — валидируется в requisites.py
+- Ставка не более 0,8% в день (ч. 23 ст. 5) — валидируется здесь
 - Потолок переплаты: проценты + неустойка ≤ 100% от основного долга
   (ч. 24 ст. 5, ред. с 01.04.2026; до этой даты — 130%)
+- Неустойка не более 20% годовых ≈ 0,055% в день, если проценты
+  продолжают начисляться, или 0,1% в день — если не начисляются
+  (ч. 21 ст. 5) — валидируется здесь
 - ПСК не более 292% годовых (ч. 11 ст. 6)
 
 Без учёта этих ограничений любой иск с завышенной суммой
 будет отменён судом по ч. 24 ст. 5 353-ФЗ.
-
-Состав долга:
-- основной долг (сумма займа)
-- проценты по ставке (с учётом потолка переплаты)
-- неустойка (пени за просрочку, с учётом потолка)
-
-Период задолженности: от даты просрочки до даты расчёта.
 """
 
 import os
@@ -34,6 +30,11 @@ MAX_OVERPAYMENT_RATIO = float(os.getenv("MAX_OVERPAYMENT_RATIO", "1.00"))
 
 # 353-ФЗ, ч. 23 ст. 5: максимальная ставка
 MAX_DAILY_RATE = 0.8  # % в день
+
+# 353-ФЗ, ч. 21 ст. 5: неустойка (пени)
+# Рабочая ставка (из .env) и абсолютный потолок
+PENALTY_DAILY_RATE = float(os.getenv("PENALTY_DAILY_RATE", "0.0005"))
+PENALTY_MAX_DAILY_RATE = float(os.getenv("PENALTY_MAX_DAILY_RATE", "0.001"))
 
 
 @dataclass
@@ -58,6 +59,7 @@ class DebtCalculation:
     raw_interest: float = 0.0             # проценты до обрезки (для аудита)
     raw_penalty: float = 0.0              # неустойка до обрезки (для аудита)
     cap_applied: bool = False             # был ли применён потолок переплаты
+    penalty_rate_used: float = 0.0        # использованная ставка неустойки
     issues: List[dict] = field(default_factory=list)
 
 
@@ -69,12 +71,49 @@ def _parse_date(value: str) -> date:
         raise ValueError(f"Неверный формат даты: {value!r} ({e})")
 
 
+def _resolve_penalty_rate() -> tuple[float, List[dict]]:
+    """
+    Определение рабочей ставки неустойки с валидацией по 353-ФЗ.
+
+    Returns:
+        (rate, issues):
+        - rate: рабочая ставка (0.0005 = 0.05% в день по умолчанию).
+        - issues: список предупреждений, если ставка из .env > потолка.
+    """
+    issues = []
+    rate = PENALTY_DAILY_RATE
+
+    if rate > PENALTY_MAX_DAILY_RATE:
+        issues.append({
+            "field": "penalty_rate",
+            "reason": (
+                f"PENALTY_DAILY_RATE={rate} превышает абсолютный потолок "
+                f"{PENALTY_MAX_DAILY_RATE} (353-ФЗ, ч. 21 ст. 5). "
+                f"Ставка обрезана до потолка."
+            ),
+            "requested_rate": rate,
+            "max_rate": PENALTY_MAX_DAILY_RATE,
+        })
+        rate = PENALTY_MAX_DAILY_RATE
+
+    if rate < 0:
+        issues.append({
+            "field": "penalty_rate",
+            "reason": f"Отрицательная ставка неустойки: {rate}. Обнулено.",
+        })
+        rate = 0.0
+
+    return rate, issues
+
+
 def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtCalculation:
     """
     Расчёт суммы задолженности из карточки.
 
-    Учитывает потолок переплаты по 353-ФЗ (ч. 24 ст. 5):
-    проценты + неустойка ≤ MAX_OVERPAYMENT_RATIO × основной долг.
+    Учитывает:
+    - Потолок переплаты по 353-ФЗ (ч. 24 ст. 5).
+    - Потолок неустойки по 353-ФЗ (ч. 21 ст. 5).
+    - Максимальную ставку по 353-ФЗ (ч. 23 ст. 5).
 
     Args:
         card: карточка должника.
@@ -119,17 +158,35 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
             penalty=0.0,
             total=principal,
             period=period,
+            penalty_rate_used=0.0,
             issues=issues,
         )
 
-    # 1. Сырые проценты (до потолка)
     days = period.days()
+
+    # 1. Валидация ставки (353-ФЗ, ч. 23 ст. 5)
+    if rate > MAX_DAILY_RATE:
+        issues.append({
+            "field": "contract.rate",
+            "reason": (
+                f"Ставка {rate}% в день превышает максимум "
+                f"{MAX_DAILY_RATE}% (353-ФЗ, ч. 23 ст. 5)"
+            ),
+            "rate": rate,
+            "max_rate": MAX_DAILY_RATE,
+        })
+
+    # 2. Определение ставки неустойки с валидацией (353-ФЗ, ч. 21 ст. 5)
+    penalty_rate, penalty_issues = _resolve_penalty_rate()
+    issues.extend(penalty_issues)
+
+    # 3. Сырые проценты (до потолка переплаты)
     raw_interest = round(principal * (rate / 100) * days, 2)
 
-    # 2. Сырая неустойка: 0.1% в день (упрощённо)
-    raw_penalty = round(principal * 0.001 * days, 2)
+    # 4. Сырая неустойка (по ставке из .env или обрезанной)
+    raw_penalty = round(principal * penalty_rate * days, 2)
 
-    # 3. Применение потолка переплаты по 353-ФЗ, ч. 24 ст. 5
+    # 5. Применение потолка переплаты по 353-ФЗ, ч. 24 ст. 5
     total_charges = raw_interest + raw_penalty
     max_charges = principal * MAX_OVERPAYMENT_RATIO
 
@@ -156,18 +213,6 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
         interest = raw_interest
         penalty = raw_penalty
 
-    # 4. Валидация ставки (353-ФЗ, ч. 23 ст. 5)
-    if rate > MAX_DAILY_RATE:
-        issues.append({
-            "field": "contract.rate",
-            "reason": (
-                f"Ставка {rate}% в день превышает максимум "
-                f"{MAX_DAILY_RATE}% (353-ФЗ, ч. 23 ст. 5)"
-            ),
-            "rate": rate,
-            "max_rate": MAX_DAILY_RATE,
-        })
-
     total = round(principal + interest + penalty, 2)
 
     return DebtCalculation(
@@ -179,6 +224,7 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
         raw_interest=raw_interest,
         raw_penalty=raw_penalty,
         cap_applied=cap_applied,
+        penalty_rate_used=penalty_rate,
         issues=issues,
     )
 
