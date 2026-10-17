@@ -27,6 +27,7 @@ services:
       - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-changeme}
       - GENERIC_TIMEZONE=Europe/Moscow
       - N8N_LOG_LEVEL=info
+      - N8N_SECURE_COOKIE=false
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
       # URL rules-service внутри Docker-сети
