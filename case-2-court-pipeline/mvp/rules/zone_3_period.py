@@ -3,28 +3,25 @@
 
 Норма: ст. 122 ГПК РФ (требование о взыскании по договору).
 
-Что проверяем:
-- Формат периода: единый ИЛИ разбивка (по месяцам/платежам).
-- Для единого периода:
-  - Соответствие карточке.
-  - Конец ≤ дата подачи.
-  - Начало > дата окончания договора / последнего платежа.
-- Для разбивки:
-  - Каждый период: start ≤ end.
-  - Нет пересечений между периодами.
-  - Нет «дыр» между периодами.
-  - Стыки непрерывны: end[i] + 1 day == start[i+1].
-  - Все периоды ≤ дата подачи.
+ВАЖНОЕ РАЗЛИЧИЕ:
+- card.period_end — последний день ПЕРИОДА ЗАДОЛЖЕННОСТИ (из карточки).
+  Это день, по который накопился долг (основной долг).
+- debt.period.end — дата, до которой начисляются ПРОЦЕНТЫ.
+  Совпадает с датой подачи (filing_date), а не с card.period_end.
 
-Как проверяем:
-- Из preprocessed.debt.period (единый) ИЛИ preprocessed.debt.periods (список).
-- Пересчёт дней, проверка дат, проверка стыков.
+Эти два поля — РАЗНЫЕ. Их нельзя сравнивать между собой.
+
+Что проверяем:
+- Период (debt.period) валиден: start ≤ end, дни пересчитаны.
+- Конец периода ≤ даты подачи (filing_date).
+- Начало периода > даты окончания договора / последнего платежа.
+- card.period_end ≤ filing_date (период задолженности не позже подачи).
+- Для разбивки — непрерывность, отсутствие пересечений и дыр.
 
 Статусы:
-- PASS: период(ы) корректны.
-- WARNING: незначительные отклонения (пересечение на 1 день).
-- FAIL: пропуск, конец в будущем, начало раньше договора,
-  пересечение > 1 дня.
+- PASS: период корректен.
+- WARNING: незначительные отклонения.
+- FAIL: пропуск, конец в будущем, начало раньше договора.
 """
 
 from datetime import date, timedelta
@@ -40,27 +37,13 @@ class Zone3Period(ZoneChecker):
     zone_name = "Период задолженности"
 
     def check(self, card: dict, preprocessed: dict) -> ZoneResult:
-        """
-        Проверка периода задолженности.
-
-        Поддерживает два формата:
-        - Единый период: preprocessed.debt.period (dict).
-        - Разбивка: preprocessed.debt.periods (list[dict]).
-
-        Args:
-            card: карточка должника.
-            preprocessed: результат препроцессора.
-
-        Returns:
-            ZoneResult со статусом PASS/WARNING/FAIL.
-        """
+        """Проверка периода задолженности."""
         issues: List[ZoneIssue] = []
 
         debt = preprocessed.get("debt", {})
         period = debt.get("period")
         periods = debt.get("periods")
 
-        # Определяем формат
         if periods and isinstance(periods, list):
             return self._check_split(card, periods, issues)
 
@@ -117,7 +100,6 @@ class Zone3Period(ZoneChecker):
 
         self._validate_period_bounds(period_start, period_end, days_calculated, issues)
         self._validate_reference_dates(card, period_start, period_end, issues)
-        self._validate_card_period(card, period_start_str, period_end_str, issues)
 
         status = self._resolve_status(issues)
         return self._make_result(
@@ -128,6 +110,8 @@ class Zone3Period(ZoneChecker):
                 "period_start": period_start.isoformat(),
                 "period_end": period_end.isoformat(),
                 "days": (period_end - period_start).days + 1,
+                "card_period_end": card.get("period_end"),
+                "filing_date": card.get("filing_date"),
             },
         )
 
@@ -139,7 +123,6 @@ class Zone3Period(ZoneChecker):
         """Проверка разбивки периодов."""
         parsed: List[tuple] = []
 
-        # 1. Парсинг всех периодов
         for idx, p in enumerate(periods):
             start_str = p.get("start")
             end_str = p.get("end")
@@ -178,15 +161,12 @@ class Zone3Period(ZoneChecker):
                 metadata={"format": "split", "periods_count": len(periods)},
             )
 
-        # 2. Каждый период: start ≤ end и пересчёт дней
+        # Каждый период: start ≤ end и пересчёт дней
         for idx, start, end, days_calc in parsed:
             if start > end:
                 issues.append(ZoneIssue(
                     field=f"debt.periods[{idx}]",
-                    reason=(
-                        f"Период #{idx}: начало ({start}) "
-                        f"позже конца ({end})"
-                    ),
+                    reason=f"Период #{idx}: начало ({start}) позже конца ({end})",
                     meta={"severity": "fail"},
                 ))
                 continue
@@ -197,15 +177,14 @@ class Zone3Period(ZoneChecker):
                     field=f"debt.periods[{idx}].days",
                     reason=(
                         f"Период #{idx}: количество дней не совпадает — "
-                        f"в препроцессоре {days_calc}, "
-                        f"пересчёт даёт {computed_days}"
+                        f"в препроцессоре {days_calc}, пересчёт даёт {computed_days}"
                     ),
                     expected=computed_days,
                     found=days_calc,
                     meta={"severity": "fail"},
                 ))
 
-        # 3. Проверка стыков: сортировка по start, потом сверка
+        # Проверка стыков
         sorted_periods = sorted(parsed, key=lambda x: x[1])
         for i in range(len(sorted_periods) - 1):
             _, start_cur, end_cur, _ = sorted_periods[i]
@@ -213,7 +192,6 @@ class Zone3Period(ZoneChecker):
 
             expected_next = end_cur + timedelta(days=1)
 
-            # Пересечение
             if start_next <= end_cur:
                 overlap_days = (end_cur - start_next).days + 1
                 severity = "warning" if overlap_days <= 1 else "fail"
@@ -221,13 +199,11 @@ class Zone3Period(ZoneChecker):
                     field=f"debt.periods[{i}]->[{i+1}]",
                     reason=(
                         f"Пересечение периодов: "
-                        f"период ({start_cur}–{end_cur}) "
-                        f"и ({start_next}–{end_next}) "
+                        f"({start_cur}–{end_cur}) и ({start_next}–{end_next}) "
                         f"пересекаются на {overlap_days} дн."
                     ),
                     meta={"severity": severity, "overlap_days": overlap_days},
                 ))
-            # Дыра
             elif start_next > expected_next:
                 gap_days = (start_next - expected_next).days
                 issues.append(ZoneIssue(
@@ -235,15 +211,14 @@ class Zone3Period(ZoneChecker):
                     reason=(
                         f"Пропуск в периодах: между "
                         f"({start_cur}–{end_cur}) и ({start_next}–{end_next}) "
-                        f"пропущено {gap_days} дн. "
-                        f"(ожидалось начало {expected_next})"
+                        f"пропущено {gap_days} дн. (ожидалось начало {expected_next})"
                     ),
                     expected=expected_next.isoformat(),
                     found=start_next.isoformat(),
                     meta={"severity": "fail", "gap_days": gap_days},
                 ))
 
-        # 4. Проверка: все периоды ≤ дата подачи
+        # Все периоды ≤ дата подачи
         filing_date = self._resolve_filing_date(card)
         if filing_date:
             for idx, start, end, _ in parsed:
@@ -259,7 +234,7 @@ class Zone3Period(ZoneChecker):
                         meta={"severity": "fail"},
                     ))
 
-        # 5. Проверка: первый период > даты окончания договора
+        # Первый период > даты окончания договора
         contract_end = self._resolve_contract_end(card)
         last_payment = self._resolve_last_payment(card)
         reference_date = last_payment or contract_end
@@ -309,10 +284,7 @@ class Zone3Period(ZoneChecker):
         if period_start > period_end:
             issues.append(ZoneIssue(
                 field="debt.period",
-                reason=(
-                    f"Начало периода ({period_start}) "
-                    f"позже конца ({period_end})"
-                ),
+                reason=f"Начало периода ({period_start}) позже конца ({period_end})",
                 meta={"severity": "fail"},
             ))
 
@@ -322,8 +294,7 @@ class Zone3Period(ZoneChecker):
                 field="debt.period.days",
                 reason=(
                     f"Количество дней не совпадает: "
-                    f"в препроцессоре {days_calculated}, "
-                    f"пересчёт даёт {computed_days}"
+                    f"в препроцессоре {days_calculated}, пересчёт даёт {computed_days}"
                 ),
                 expected=computed_days,
                 found=days_calculated,
@@ -337,7 +308,13 @@ class Zone3Period(ZoneChecker):
         period_end: date,
         issues: List[ZoneIssue],
     ) -> None:
-        """Проверка единого периода относительно дат договора и подачи."""
+        """
+        Проверка единого периода относительно дат договора и подачи.
+
+        ВАЖНО: здесь НЕ сравниваем period_end с card.period_end —
+        это разные понятия (см. docstring модуля).
+        """
+        # 1. Конец периода ≤ дата подачи
         filing_date = self._resolve_filing_date(card)
         if filing_date and period_end > filing_date:
             issues.append(ZoneIssue(
@@ -351,6 +328,7 @@ class Zone3Period(ZoneChecker):
                 meta={"severity": "fail"},
             ))
 
+        # 2. Начало периода > даты окончания договора / последнего платежа
         contract_end = self._resolve_contract_end(card)
         last_payment = self._resolve_last_payment(card)
         reference_date = last_payment or contract_end
@@ -368,40 +346,24 @@ class Zone3Period(ZoneChecker):
                 meta={"severity": "fail"},
             ))
 
-    def _validate_card_period(
-        self,
-        card: dict,
-        period_start_str: str,
-        period_end_str: str,
-        issues: List[ZoneIssue],
-    ) -> None:
-        """Сверка единого периода с карточкой."""
-        card_period_start = card.get("period_start")
-        card_period_end = card.get("period_end")
-
-        if card_period_start and card_period_start != period_start_str:
-            issues.append(ZoneIssue(
-                field="period.start",
-                reason=(
-                    f"Начало периода в карточке ({card_period_start}) "
-                    f"не совпадает с расчётом ({period_start_str})"
-                ),
-                expected=card_period_start,
-                found=period_start_str,
-                meta={"severity": "fail"},
-            ))
-
-        if card_period_end and card_period_end != period_end_str:
-            issues.append(ZoneIssue(
-                field="period.end",
-                reason=(
-                    f"Конец периода в карточке ({card_period_end}) "
-                    f"не совпадает с расчётом ({period_end_str})"
-                ),
-                expected=card_period_end,
-                found=period_end_str,
-                meta={"severity": "fail"},
-            ))
+        # 3. card.period_end ≤ filing_date (если оба заданы)
+        card_period_end_str = card.get("period_end")
+        if card_period_end_str and filing_date:
+            try:
+                card_period_end = date.fromisoformat(card_period_end_str)
+                if card_period_end > filing_date:
+                    issues.append(ZoneIssue(
+                        field="period.end",
+                        reason=(
+                            f"Период задолженности в карточке ({card_period_end}) "
+                            f"позже даты подачи ({filing_date})"
+                        ),
+                        expected=filing_date.isoformat(),
+                        found=card_period_end.isoformat(),
+                        meta={"severity": "fail"},
+                    ))
+            except (ValueError, TypeError):
+                pass
 
     # ------------------------------------------------------------------ #
     # Вспомогательные методы                                              #
