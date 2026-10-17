@@ -30,7 +30,7 @@
 from typing import List, Optional
 
 from .base import ZoneChecker, ZoneIssue, ZoneResult, ZoneStatus
-from ..preprocessor.calculator import (
+from preprocessor.calculator import (
     parse_amount_from_text,
     MAX_OVERPAYMENT_RATIO,
     MAX_DAILY_RATE,
