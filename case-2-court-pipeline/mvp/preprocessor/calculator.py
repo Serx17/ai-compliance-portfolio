@@ -133,18 +133,15 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
         raise ValueError("В карточке нет contract.end_date")
 
     contract_end_date = _parse_date(contract_end)
-    calc_date = calculation_date or date.today()
-
-    # Период задолженности: с дня после окончания договора
-    period_start = contract_end_date + timedelta(days=1)
-
-    # Если есть payments — период начинается с последнего платежа
-    payments = card.get("payments", [])
-    if payments:
-        last_payment = max(_parse_date(p["date"]) for p in payments)
-        period_start = last_payment + timedelta(days=1)
-
-    period_end = calc_date
+        # Период — до даты подачи (если есть), иначе до даты расчёта
+    filing_date_str = card.get("filing_date")
+    if filing_date_str:
+        try:
+            period_end = date.fromisoformat(filing_date_str)
+        except (ValueError, TypeError):
+            period_end = calculation_date or date.today()
+    else:
+        period_end = calculation_date or date.today()
     period = Period(start=period_start, end=period_end)
 
     if period.days() <= 0:
