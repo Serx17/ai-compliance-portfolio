@@ -38,8 +38,11 @@ COPY preprocessor /app/preprocessor
 COPY rules /app/rules
 COPY rules-service /app/rules-service
 
-# Путь для PDF
-RUN mkdir -p /tmp/court-pdfs
+# Скрипты генерации синтетики и тестов
+COPY scripts /app/scripts
+
+# Директория для синтетики и PDF
+RUN mkdir -p /app/synthetic-data/cards /app/synthetic-data/injected-bugs /tmp/court-pdfs
 
 # Порт
 EXPOSE 8001
