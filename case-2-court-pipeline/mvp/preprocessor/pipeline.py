@@ -11,6 +11,11 @@ LLM получает уже подготовленные данные и НЕ м
 - 353-ФЗ, ч. 23 ст. 5: максимальная ставка
 - 353-ФЗ, ч. 24 ст. 5: потолок переплаты
 - 353-ФЗ, ч. 21 ст. 5: потолок неустойки
+
+ВАЖНО: calculation_date передаётся в calculator.py как None,
+если явно не задана. Тогда calculator.py сам решит:
+- filing_date из карточки → period_end
+- date.today() → fallback.
 """
 
 from datetime import date
@@ -34,10 +39,13 @@ class Preprocessor:
         """
         Args:
             card: карточка должника (dict).
-            calculation_date: дата расчёта (по умолчанию — сегодня).
+            calculation_date: дата расчёта.
+                - Если задана явно → используется.
+                - Если None → calculator.py берёт filing_date из карточки,
+                  иначе date.today().
         """
         self.card = card
-        self.calculation_date = calculation_date or date.today()
+        self.calculation_date = calculation_date  # ← НЕ подменяем на today!
 
     def run(self) -> dict:
         """
@@ -57,11 +65,24 @@ class Preprocessor:
         requisites = format_requisites(self.card)
 
         # 2. Расчёт задолженности (с учётом 353-ФЗ)
+        # calculation_date=None → calculator.py сам решит (filing_date → today)
         debt: DebtCalculation = calculate_debt(self.card, self.calculation_date)
 
         # 3. Исковая давность
+        # Для проверки давности явно передаём дату подачи (или сегодня)
+        filing_date_for_limitation = self.calculation_date
+        if filing_date_for_limitation is None:
+            filing_date_str = self.card.get("filing_date")
+            if filing_date_str:
+                try:
+                    filing_date_for_limitation = date.fromisoformat(filing_date_str)
+                except (ValueError, TypeError):
+                    filing_date_for_limitation = date.today()
+            else:
+                filing_date_for_limitation = date.today()
+
         limitation: LimitationResult = check_limitation(
-            self.card, filing_date=self.calculation_date
+            self.card, filing_date=filing_date_for_limitation
         )
 
         # Собираем issues
