@@ -24,15 +24,12 @@ import re
 
 
 # 353-ФЗ, ч. 24 ст. 5: потолок переплаты
-# До 01.04.2026 — 130% (1.30)
-# С 01.04.2026 — 100% (1.00)
 MAX_OVERPAYMENT_RATIO = float(os.getenv("MAX_OVERPAYMENT_RATIO", "1.00"))
 
 # 353-ФЗ, ч. 23 ст. 5: максимальная ставка
 MAX_DAILY_RATE = 0.8  # % в день
 
 # 353-ФЗ, ч. 21 ст. 5: неустойка (пени)
-# Рабочая ставка (из .env) и абсолютный потолок
 PENALTY_DAILY_RATE = float(os.getenv("PENALTY_DAILY_RATE", "0.0005"))
 PENALTY_MAX_DAILY_RATE = float(os.getenv("PENALTY_MAX_DAILY_RATE", "0.001"))
 
@@ -51,15 +48,15 @@ class Period:
 @dataclass
 class DebtCalculation:
     """Результат расчёта задолженности."""
-    principal: float                      # основной долг
-    interest: float                       # проценты (после обрезки по потолку)
-    penalty: float                        # неустойка (после обрезки по потолку)
-    total: float                          # итого
-    period: Period                        # период задолженности
-    raw_interest: float = 0.0             # проценты до обрезки (для аудита)
-    raw_penalty: float = 0.0              # неустойка до обрезки (для аудита)
-    cap_applied: bool = False             # был ли применён потолок переплаты
-    penalty_rate_used: float = 0.0        # использованная ставка неустойки
+    principal: float
+    interest: float
+    penalty: float
+    total: float
+    period: Period
+    raw_interest: float = 0.0
+    raw_penalty: float = 0.0
+    cap_applied: bool = False
+    penalty_rate_used: float = 0.0
     issues: List[dict] = field(default_factory=list)
 
 
@@ -72,14 +69,7 @@ def _parse_date(value: str) -> date:
 
 
 def _resolve_penalty_rate() -> tuple[float, List[dict]]:
-    """
-    Определение рабочей ставки неустойки с валидацией по 353-ФЗ.
-
-    Returns:
-        (rate, issues):
-        - rate: рабочая ставка (0.0005 = 0.05% в день по умолчанию).
-        - issues: список предупреждений, если ставка из .env > потолка.
-    """
+    """Определение ставки неустойки с валидацией по 353-ФЗ."""
     issues = []
     rate = PENALTY_DAILY_RATE
 
@@ -117,7 +107,8 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
 
     Args:
         card: карточка должника.
-        calculation_date: дата расчёта (по умолчанию — сегодня).
+        calculation_date: дата расчёта (если не задана — используется
+            filing_date из карточки или сегодня).
 
     Returns:
         DebtCalculation с разбивкой и списком issues.
@@ -133,15 +124,31 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
         raise ValueError("В карточке нет contract.end_date")
 
     contract_end_date = _parse_date(contract_end)
-        # Период — до даты подачи (если есть), иначе до даты расчёта
-    filing_date_str = card.get("filing_date")
-    if filing_date_str:
-        try:
-            period_end = date.fromisoformat(filing_date_str)
-        except (ValueError, TypeError):
-            period_end = calculation_date or date.today()
+
+    # ---- 1. Определение period_start ----
+    # По умолчанию: день после окончания договора.
+    period_start = contract_end_date + timedelta(days=1)
+
+    # Если есть платежи — с последнего платежа.
+    payments = card.get("payments", [])
+    if payments:
+        last_payment = max(_parse_date(p["date"]) for p in payments)
+        period_start = last_payment + timedelta(days=1)
+
+    # ---- 2. Определение period_end ----
+    # Приоритет: calculation_date (если явно задана) → filing_date → сегодня.
+    if calculation_date is not None:
+        period_end = calculation_date
     else:
-        period_end = calculation_date or date.today()
+        filing_date_str = card.get("filing_date")
+        if filing_date_str:
+            try:
+                period_end = date.fromisoformat(filing_date_str)
+            except (ValueError, TypeError):
+                period_end = date.today()
+        else:
+            period_end = date.today()
+
     period = Period(start=period_start, end=period_end)
 
     if period.days() <= 0:
@@ -161,7 +168,7 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
 
     days = period.days()
 
-    # 1. Валидация ставки (353-ФЗ, ч. 23 ст. 5)
+    # ---- 3. Валидация ставки (353-ФЗ, ч. 23 ст. 5) ----
     if rate > MAX_DAILY_RATE:
         issues.append({
             "field": "contract.rate",
@@ -173,17 +180,15 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
             "max_rate": MAX_DAILY_RATE,
         })
 
-    # 2. Определение ставки неустойки с валидацией (353-ФЗ, ч. 21 ст. 5)
+    # ---- 4. Ставка неустойки (353-ФЗ, ч. 21 ст. 5) ----
     penalty_rate, penalty_issues = _resolve_penalty_rate()
     issues.extend(penalty_issues)
 
-    # 3. Сырые проценты (до потолка переплаты)
+    # ---- 5. Сырые проценты и неустойка ----
     raw_interest = round(principal * (rate / 100) * days, 2)
-
-    # 4. Сырая неустойка (по ставке из .env или обрезанной)
     raw_penalty = round(principal * penalty_rate * days, 2)
 
-    # 5. Применение потолка переплаты по 353-ФЗ, ч. 24 ст. 5
+    # ---- 6. Потолок переплаты (353-ФЗ, ч. 24 ст. 5) ----
     total_charges = raw_interest + raw_penalty
     max_charges = principal * MAX_OVERPAYMENT_RATIO
 
@@ -227,16 +232,7 @@ def calculate_debt(card: dict, calculation_date: Optional[date] = None) -> DebtC
 
 
 def parse_amount_from_text(text: str) -> Optional[float]:
-    """
-    Парсинг суммы из текста документа.
-
-    Используется в Зоне 2 для сверки суммы из документа с расчётной.
-
-    Примеры:
-        "75 000,00 руб." → 75000.00
-        "75000.00" → 75000.00
-        "75 000 рублей" → 75000.00
-    """
+    """Парсинг суммы из текста документа."""
     if not text:
         return None
 
