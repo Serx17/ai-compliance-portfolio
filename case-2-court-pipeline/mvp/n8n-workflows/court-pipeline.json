@@ -11,7 +11,7 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.2,
       "position": [
-        0,
+        -224,
         0
       ],
       "id": "619ca4a0-809a-4eec-a1d8-6ce4d3e914ee",
@@ -30,7 +30,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        224,
+        -16,
         0
       ],
       "id": "f23222fb-49cd-412e-bccc-7b82efbef36c",
@@ -45,11 +45,55 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.5,
       "position": [
-        448,
-        0
+        656,
+        -112
       ],
       "id": "bca7c193-6136-48c6-a649-48b3a1d0f508",
       "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "fa374bb3-1601-4391-9431-34405334a916",
+              "leftValue": "={{ $json.report.summary.requires_hitl }}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "6e045189-561d-4c94-bd01-182d16611b7b",
+              "leftValue": "",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        176,
+        0
+      ],
+      "id": "51bbdf10-9f1d-4c99-baf4-36a6051f19a0",
+      "name": "If"
     }
   ],
   "pinData": {},
@@ -69,6 +113,24 @@
       "main": [
         [
           {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Respond to Webhook",
             "type": "main",
             "index": 0
@@ -77,12 +139,12 @@
       ]
     }
   },
-  "active": false,
+  "active": true,
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
   },
-  "versionId": "da0e4ae6-ed0d-4fcf-98cc-8e9e88709a52",
+  "versionId": "7594c916-75e4-48d0-8332-d4edc20c6701",
   "meta": {
     "instanceId": "dcfd8497b55f006f42b2655d0ed29f3c05128b8f75ef0f053cb877b9d214f96c"
   },
