@@ -32,13 +32,15 @@ from rules.runner import RulesRunner
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-app = FastAPI(title="Court Rules Service", version="0.3.1")
+app = FastAPI(title="Court Rules Service", version="0.3.2")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
-# Таймаут LLM: 300 секунд (5 минут) — с запасом на полный промпт
-LLM_TIMEOUT = 300.0
+# Таймаут LLM: 120 секунд (достаточно с num_predict)
+LLM_TIMEOUT = 120.0
+# Максимальная длина ответа LLM (токены)
+LLM_NUM_PREDICT = 500
 
 
 class CardRequest(BaseModel):
@@ -63,7 +65,7 @@ class PdfResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "rules-service", "version": "0.3.1"}
+    return {"status": "ok", "service": "rules-service", "version": "0.3.2"}
 
 
 @app.post("/preprocess")
@@ -87,7 +89,7 @@ async def generate_text(request: TextRequest):
     req = pp.get("requisites", {})
     
     prompt = f"""Ты — опытный юрист МФО. Составь текст судебного приказа о взыскании задолженности.
-    
+
 Данные:
 Взыскатель: {req.get('creditor', {}).get('name')}
 Должник: {req.get('respondent', {}).get('fio')}
@@ -100,8 +102,7 @@ async def generate_text(request: TextRequest):
 - Неустойка: {debt.get('penalty')} руб.
 - ИТОГО: {debt.get('total')} руб.
 
-Напиши краткий, официальный текст приказа. Укажи, что требование основано на договоре займа, и что сумма подлежит взысканию. Не придумывай свои цифры.
-"""
+Напиши краткий, официальный текст приказа. Укажи, что требование основано на договоре займа."""
     
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
@@ -109,7 +110,10 @@ async def generate_text(request: TextRequest):
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.0},
+                "options": {
+                    "temperature": 0.0,
+                    "num_predict": LLM_NUM_PREDICT,
+                },
             })
             resp.raise_for_status()
             text = resp.json().get("response", "").strip()
