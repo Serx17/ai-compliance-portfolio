@@ -32,10 +32,13 @@ from rules.runner import RulesRunner
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-app = FastAPI(title="Court Rules Service", version="0.3.0")
+app = FastAPI(title="Court Rules Service", version="0.3.1")
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+
+# Таймаут LLM: 300 секунд (5 минут) — с запасом на полный промпт
+LLM_TIMEOUT = 300.0
 
 
 class CardRequest(BaseModel):
@@ -60,7 +63,7 @@ class PdfResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "rules-service", "version": "0.3.0"}
+    return {"status": "ok", "service": "rules-service", "version": "0.3.1"}
 
 
 @app.post("/preprocess")
@@ -101,7 +104,7 @@ async def generate_text(request: TextRequest):
 """
     
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             resp = await client.post(f"{OLLAMA_URL}/api/generate", json={
                 "model": OLLAMA_MODEL,
                 "prompt": prompt,
@@ -110,10 +113,14 @@ async def generate_text(request: TextRequest):
             })
             resp.raise_for_status()
             text = resp.json().get("response", "").strip()
+            logger.info("LLM generation OK: case_id=%s, length=%d", card.get("case_id"), len(text))
             return {"case_id": card.get("case_id"), "generated_text": text}
+    except httpx.TimeoutException as e:
+        logger.error("LLM timeout after %.0fs: %s", LLM_TIMEOUT, e)
+        raise HTTPException(status_code=504, detail=f"LLM таймаут ({LLM_TIMEOUT}s): {e}")
     except Exception as e:
-        logger.error("LLM generation failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Ошибка LLM: {e}")
+        logger.error("LLM generation failed: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=500, detail=f"Ошибка LLM: {type(e).__name__}: {e}")
 
 
 @app.post("/check")
