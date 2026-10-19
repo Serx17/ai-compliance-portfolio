@@ -6,6 +6,7 @@ Endpoints:
 - POST /preprocess   — препроцессор: расчёты, реквизиты, давность.
 - POST /check        — препроцессор + 7 зон → итоговый отчёт.
 - POST /generate-pdf — генерация PDF судебного приказа.
+- GET  /download-pdf/{case_id} — скачивание PDF.
 
 Запуск:
     uvicorn rules-service.main:app --host 0.0.0.0 --port 8001
@@ -39,7 +40,7 @@ logging.basicConfig(
 app = FastAPI(
     title="Court Rules Service",
     description="Препроцессор + 7 зон контроля для Кейса №2",
-    version="0.2.0",
+    version="0.2.1",
 )
 
 
@@ -63,11 +64,9 @@ class CheckResponse(BaseModel):
 
 
 class PdfRequest(BaseModel):
-    card: dict = Field(..., description="Карточка должника")
-    report: dict = Field(..., description="Отчёт от /check")
-    hitl_decision: Optional[dict] = Field(
-        None, description="Решение HITL (approved, comment)"
-    )
+    card: dict
+    report: dict
+    hitl_decision: Optional[dict] = None
 
 
 class PdfResponse(BaseModel):
@@ -88,23 +87,20 @@ class HealthResponse(BaseModel):
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", service="rules-service", version="0.2.0")
+    return HealthResponse(status="ok", service="rules-service", version="0.2.1")
 
 
 @app.post("/preprocess", response_model=PreprocessResponse)
 def preprocess(request: CardRequest) -> PreprocessResponse:
     card = request.card
     case_id = card.get("case_id", "unknown")
-    logger.info("Preprocess request: case_id=%s", case_id)
     try:
         calc_date = (
             date.fromisoformat(request.calculation_date)
-            if request.calculation_date
-            else None
+            if request.calculation_date else None
         )
         preprocessor = Preprocessor(card=card, calculation_date=calc_date)
-        result = preprocessor.run()
-        return PreprocessResponse(case_id=case_id, preprocessed=result)
+        return PreprocessResponse(case_id=case_id, preprocessed=preprocessor.run())
     except Exception as e:
         logger.error("Preprocess failed: case_id=%s error=%s", case_id, e)
         raise HTTPException(status_code=400, detail=f"Препроцессор упал: {e}")
@@ -114,12 +110,10 @@ def preprocess(request: CardRequest) -> PreprocessResponse:
 def check(request: CardRequest) -> CheckResponse:
     card = request.card
     case_id = card.get("case_id", "unknown")
-    logger.info("Check request: case_id=%s", case_id)
     try:
         calc_date = (
             date.fromisoformat(request.calculation_date)
-            if request.calculation_date
-            else None
+            if request.calculation_date else None
         )
         preprocessor = Preprocessor(card=card, calculation_date=calc_date)
         preprocessed = preprocessor.run()
@@ -133,30 +127,15 @@ def check(request: CardRequest) -> CheckResponse:
 
 @app.post("/generate-pdf", response_model=PdfResponse)
 def generate_pdf(request: PdfRequest) -> PdfResponse:
-    """
-    Генерация PDF судебного приказа.
-
-    В MVP — упрощённый PDF: титул + реквизиты + решение по зонам.
-    В production — полный шаблон по ст. 124 ГПК РФ.
-    """
     card = request.card
     report = request.report
     case_id = card.get("case_id", "unknown")
-    logger.info("PDF request: case_id=%s", case_id)
-
     try:
         pdf_dir = Path(os.getenv("PDF_OUTPUT_DIR", "/tmp/court-pdfs"))
         pdf_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = pdf_dir / f"{case_id}.pdf"
-
         _render_pdf(pdf_path, card, report, request.hitl_decision)
-
-        logger.info("PDF generated: case_id=%s path=%s", case_id, pdf_path)
-        return PdfResponse(
-            case_id=case_id,
-            pdf_path=str(pdf_path),
-            status="generated",
-        )
+        return PdfResponse(case_id=case_id, pdf_path=str(pdf_path), status="generated")
     except Exception as e:
         logger.error("PDF failed: case_id=%s error=%s", case_id, e)
         raise HTTPException(status_code=400, detail=f"PDF упал: {e}")
@@ -164,7 +143,6 @@ def generate_pdf(request: PdfRequest) -> PdfResponse:
 
 @app.get("/download-pdf/{case_id}")
 def download_pdf(case_id: str):
-    """Скачивание готового PDF."""
     pdf_dir = Path(os.getenv("PDF_OUTPUT_DIR", "/tmp/court-pdfs"))
     pdf_path = pdf_dir / f"{case_id}.pdf"
     if not pdf_path.exists():
@@ -180,26 +158,63 @@ def download_pdf(case_id: str):
 # PDF-рендеринг (упрощённый MVP)                                    #
 # ---------------------------------------------------------------- #
 
+# Пути к системным шрифтам с поддержкой кириллицы (Debian/Ubuntu)
+FONT_DIRS = [
+    Path("/usr/share/fonts/truetype/dejavu"),
+    Path("/usr/share/fonts/dejavu"),
+    Path("/usr/share/fonts/truetype"),
+]
+
+FONT_REGULAR_NAMES = ["DejaVuSans.ttf", "DejaVuSansCondensed.ttf", "arial.ttf"]
+FONT_BOLD_NAMES = ["DejaVuSans-Bold.ttf", "DejaVuSansCondensed-Bold.ttf", "arialbd.ttf"]
+
+
+def _find_font(names):
+    """Найти первый существующий файл шрифта по списку имён."""
+    for d in FONT_DIRS:
+        for name in names:
+            p = d / name
+            if p.exists():
+                return p
+    return None
+
+
 def _render_pdf(
     path: Path,
     card: dict,
     report: dict,
     hitl_decision: Optional[dict] = None,
 ) -> None:
-    """
-    Рендер PDF через reportlab.
-
-    MVP: титул + реквизиты + отчёт по зонам + HITL-решение.
-    """
+    """Рендер PDF с поддержкой кириллицы."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     )
     from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
 
+    # --- Регистрация шрифта с кириллицей ---
+    font_regular = _find_font(FONT_REGULAR_NAMES)
+    font_bold = _find_font(FONT_BOLD_NAMES)
+
+    if not font_regular:
+        raise RuntimeError(
+            "Не найден шрифт с поддержкой кириллицы. "
+            "Установите fonts-dejavu: apt-get install fonts-dejavu"
+        )
+
+    pdfmetrics.registerFont(TTFont("AppFont", str(font_regular)))
+    if font_bold:
+        pdfmetrics.registerFont(TTFont("AppFont-Bold", str(font_bold)))
+        bold_name = "AppFont-Bold"
+    else:
+        bold_name = "AppFont"
+
+    # --- Документ ---
     doc = SimpleDocTemplate(
         str(path),
         pagesize=A4,
@@ -213,15 +228,19 @@ def _render_pdf(
 
     styles = getSampleStyleSheet()
     style_h1 = ParagraphStyle(
-        "H1", parent=styles["Heading1"],
-        fontSize=14, alignment=TA_CENTER, spaceAfter=12,
+        "H1App", parent=styles["Heading1"],
+        fontName=bold_name, fontSize=14, alignment=TA_CENTER, spaceAfter=12,
     )
     style_h2 = ParagraphStyle(
-        "H2", parent=styles["Heading2"],
-        fontSize=11, spaceAfter=6, spaceBefore=10,
+        "H2App", parent=styles["Heading2"],
+        fontName=bold_name, fontSize=11, spaceAfter=6, spaceBefore=10,
     )
     style_normal = ParagraphStyle(
-        "Normal", parent=styles["Normal"], fontSize=9, leading=12,
+        "NormalApp", parent=styles["Normal"],
+        fontName="AppFont", fontSize=9, leading=12,
+    )
+    style_small_center = ParagraphStyle(
+        "SmallCenter", parent=style_normal, alignment=TA_CENTER, fontSize=8,
     )
 
     story = []
@@ -230,16 +249,12 @@ def _render_pdf(
     story.append(Paragraph("СУДЕБНЫЙ ПРИКАЗ", style_h1))
     story.append(Paragraph(
         f"(проект, сгенерирован {datetime.now().strftime('%d.%m.%Y %H:%M')})",
-        ParagraphStyle("sub", parent=style_normal, alignment=TA_CENTER, fontSize=8),
+        style_small_center,
     ))
     story.append(Spacer(1, 8 * mm))
 
-    # --- Реквизиты ---
+    # --- Реквизиты взыскателя ---
     creditor = card.get("creditor", {})
-    respondent = card.get("respondent", {})
-    contract = card.get("contract", {})
-    debt = report.get("zones") and card or {}  # placeholder
-
     story.append(Paragraph("Взыскатель", style_h2))
     story.append(Paragraph(
         f"{creditor.get('name', '—')}<br/>"
@@ -248,6 +263,8 @@ def _render_pdf(
     ))
     story.append(Spacer(1, 4 * mm))
 
+    # --- Реквизиты должника ---
+    respondent = card.get("respondent", {})
     story.append(Paragraph("Должник", style_h2))
     story.append(Paragraph(
         f"{respondent.get('fio', '—')}<br/>"
@@ -258,17 +275,19 @@ def _render_pdf(
     ))
     story.append(Spacer(1, 4 * mm))
 
+    # --- Договор ---
+    contract = card.get("contract", {})
     story.append(Paragraph("Договор", style_h2))
     story.append(Paragraph(
         f"Номер: {contract.get('number', '—')}<br/>"
         f"Дата: {contract.get('date', '—')}<br/>"
-        f"Сумма: {contract.get('amount', '—')} ₽<br/>"
+        f"Сумма: {contract.get('amount', '—')} руб.<br/>"
         f"Срок: {contract.get('end_date', '—')}",
         style_normal,
     ))
     story.append(Spacer(1, 6 * mm))
 
-    # --- Отчёт по зонам ---
+    # --- Таблица результатов 7 зон ---
     story.append(Paragraph("Результаты автоматической проверки", style_h2))
 
     zones = report.get("zones", [])
@@ -285,7 +304,8 @@ def _render_pdf(
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTNAME", (0, 0), (-1, 0), bold_name),
+            ("FONTNAME", (0, 1), (-1, -1), "AppFont"),
             ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("ALIGN", (0, 0), (-1, -1), "LEFT"),
             ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
