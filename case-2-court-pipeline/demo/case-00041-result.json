@@ -1,0 +1,131 @@
+{
+  "case_id": "case-00041",
+  "report": {
+    "case_id": "case-00041",
+    "zones": [
+      {
+        "zone": 1,
+        "zone_name": "Реквизиты сторон",
+        "status": "pass",
+        "issues": [],
+        "metadata": {
+          "required_creditor_fields": ["name", "inn", "ogrn"],
+          "required_respondent_fields": ["fio", "birth_date", "address"],
+          "validation_issues_from_preprocessor": 0
+        }
+      },
+      {
+        "zone": 2,
+        "zone_name": "Сумма иска",
+        "status": "fail",
+        "issues": [
+          {
+            "field": "debt.cap_applied",
+            "reason": "Потолок переплаты 100% применён (353-ФЗ, ч. 24 ст. 5). Сырые: проценты 20400.0 ₽, неустойка 850.0 ₽. После обрезки: проценты 19200.0 ₽, неустойка 800.0 ₽.",
+            "meta": {"severity": "warning", "cap_ratio": 1, "raw_interest": 20400, "raw_penalty": 850}
+          },
+          {
+            "field": "contract.rate",
+            "reason": "Ставка 1.2% в день превышает максимум 0.8% (353-ФЗ, ч. 23 ст. 5)",
+            "expected": 0.8,
+            "found": 1.2,
+            "meta": {"severity": "fail"}
+          }
+        ],
+        "metadata": {
+          "principal": 20000,
+          "interest": 19200,
+          "penalty": 800,
+          "total_calculated": 40000,
+          "document_amount": null,
+          "cap_applied": true,
+          "max_overpayment_ratio": 1,
+          "max_daily_rate": 0.8,
+          "penalty_max_daily_rate": 0.001
+        }
+      },
+      {
+        "zone": 3,
+        "zone_name": "Период задолженности",
+        "status": "pass",
+        "issues": [],
+        "metadata": {
+          "format": "single",
+          "period_start": "2024-10-04",
+          "period_end": "2024-12-27",
+          "days": 85,
+          "card_period_end": "2024-12-03",
+          "filing_date": "2024-12-27"
+        }
+      },
+      {
+        "zone": 4,
+        "zone_name": "Приложения",
+        "status": "fail",
+        "issues": [
+          {
+            "field": "document.appendices",
+            "reason": "Отсутствует обязательное приложение: «расчёт задолженности» (ст. 124 ГПК РФ)",
+            "expected": "расчёт задолженности",
+            "meta": {"severity": "fail"}
+          }
+        ],
+        "metadata": {
+          "required_count": 3,
+          "total_appendices": 2,
+          "missing_required": ["расчёт задолженности"],
+          "appendices": ["договор займа", "документ об уплате государственной пошлины"]
+        }
+      },
+      {
+        "zone": 5,
+        "zone_name": "Подсудность",
+        "status": "fail",
+        "issues": [
+          {
+            "field": "document.court",
+            "reason": "Суд в документе («Судебный участок № 100 Центрального района г. Москвы») не соответствует месту жительства должника («г. Казань, Вахитовский район, ул. Гагарина, д. 70, кв. 75»). Нарушение ст. 28 ГПК РФ.",
+            "expected": "Суд региона 16",
+            "found": "Суд региона 77",
+            "meta": {"severity": "fail", "respondent_region": "16", "court_region": "77"}
+          },
+          {
+            "field": "document.court",
+            "reason": "Судебный приказ выдаёт мировой судья (п. 1 ч. 1 ст. 23 ГПК РФ). В документе указан: «Судебный участок № 100 Центрального района г. Москвы»",
+            "found": "Судебный участок № 100 Центрального района г. Москвы",
+            "meta": {"severity": "warning"}
+          }
+        ],
+        "metadata": {
+          "respondent_address": "г. Казань, Вахитовский район, ул. Гагарина, д. 70, кв. 75",
+          "document_court": "Судебный участок № 100 Центрального района г. Москвы",
+          "respondent_region": "16",
+          "court_region": "77",
+          "has_contractual_jurisdiction": false
+        }
+      },
+      {
+        "zone": 6,
+        "zone_name": "Исковая давность",
+        "status": "pass",
+        "issues": [],
+        "metadata": {"is_expired": false, "days_since": 85, "threshold_days": 1095, "days_remaining": 1010, "has_break": false}
+      },
+      {
+        "zone": 7,
+        "zone_name": "ПДн третьих лиц",
+        "status": "pass",
+        "issues": [],
+        "metadata": {"third_parties_count": 0, "message": "Третьи лица не упоминаются"}
+      }
+    ],
+    "summary": {
+      "total_zones": 7,
+      "passed": 4,
+      "warnings": 0,
+      "failed": 3,
+      "critical_issues": 3,
+      "requires_hitl": true
+    }
+  }
+}
