@@ -1,0 +1,78 @@
+{
+  "creative_id": "creative-00042",
+  "checks": [
+    {
+      "zone": 1,
+      "zone_name": "Гарантии доходности",
+      "status": "fail",
+      "issues": [
+        {
+          "field": "text",
+          "quote": "Гарантированный доход 30% годовых",
+          "reason": "Гарантия доходности — недостоверная реклама (ст. 5 ФЗ «О рекламе»)"
+        }
+      ]
+    },
+    {
+      "zone": 2,
+      "zone_name": "Указание ПСК",
+      "status": "fail",
+      "issues": [
+        {
+          "field": "text",
+          "reason": "Указана ставка, но отсутствует фраза «полная стоимость кредита (займа)»",
+          "expected": "полная стоимость кредита (займа) от X% до Y%",
+          "found": "ставка 5%"
+        }
+      ]
+    },
+    {
+      "zone": 3,
+      "zone_name": "Использование бренда",
+      "status": "pass",
+      "issues": []
+    },
+    {
+      "zone": 4,
+      "zone_name": "Скрытые комиссии",
+      "status": "warning",
+      "issues": [
+        {
+          "field": "text",
+          "reason": "Указана только ставка. Не указаны: страховка, комиссия, сроки."
+        }
+      ]
+    },
+    {
+      "zone": 5,
+      "zone_name": "Маркировка ERID",
+      "status": "fail",
+      "issues": [
+        {
+          "field": "image",
+          "reason": "Отсутствует токен ERID. С 2026 года расходы без ERID не учитываются для налога (п. 44 ст. 270 НК РФ)."
+        }
+      ]
+    },
+    {
+      "zone": 6,
+      "zone_name": "Запрещённые соцсети",
+      "status": "pass",
+      "issues": []
+    },
+    {
+      "zone": 7,
+      "zone_name": "Русский язык",
+      "status": "pass",
+      "issues": []
+    }
+  ],
+  "summary": {
+    "total_zones": 7,
+    "passed": 3,
+    "failed": 3,
+    "warnings": 1,
+    "requires_hitl": true,
+    "critical_issues": 3
+  }
+}
